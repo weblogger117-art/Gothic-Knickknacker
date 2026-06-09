@@ -1,0 +1,424 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DB's Gothic-Schlossknacker 6.4.3 Final Premium PWA</title>
+<meta name="theme-color" content="#1a1f25">
+<link rel="manifest" href="manifest.json">
+<style>
+:root{--a:#ffb45c;--bg:#0d0f12;--p:#1a1f25;--b:#3b434d}
+body{background:radial-gradient(circle at top,#1b1f24,#0d0f12 70%);color:#ddd;font-family:Segoe UI,Arial;max-width:1400px;margin:auto;padding:20px}
+.panel{background:var(--p);border:1px solid var(--b);padding:15px;margin:12px 0;border-radius:8px}
+h1,h2{color:var(--a)}
+button{background:linear-gradient(#434c57,#1f252c);color:var(--a);border:1px solid #596473;padding:10px 14px;border-radius:6px;cursor:pointer;font-weight:bold}
+button:hover,.cell:hover,.mcell:hover{border-color:var(--a);box-shadow:0 0 10px rgba(255,180,92,.7)}
+.track{display:flex;gap:4px}
+.cell{width:34px;height:34px;border:1px solid #49515b;background:#222;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.active{background:linear-gradient(#ffb45c,#b86618);color:#111;font-weight:bold;box-shadow:0 0 12px rgba(255,180,92,.9)}
+.goal{border:2px solid #d4af37 !important;box-shadow:0 0 8px rgba(212,175,55,.7)}
+.matrix{border-collapse:collapse}.matrix td,.matrix th{border:1px solid #444;width:40px;height:40px;text-align:center}
+.none{background:#222}.plus{background:#b86618}.minus{background:#44556a}.lock{background:#111}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:900px){
+ .layout{grid-template-columns:1fr}
+ .cell{width:48px;height:48px;font-size:16px}
+ .matrix td,.matrix th{width:48px;height:48px}
+ button{padding:14px 18px;margin:4px 0}
+}
+.current{color:var(--a);font-weight:bold}.done{color:#7f8c8d}
+
+#splashOverlay{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:99999;opacity:1;transition:opacity .8s}
+#splashOverlay img{max-width:92vw;max-height:100vh;object-fit:contain;animation:glowPulse .9s ease-in-out 2}
+@keyframes glowPulse{
+0%{filter:drop-shadow(0 0 5px #ffb45c)}
+50%{filter:drop-shadow(0 0 25px #ffb45c)}
+100%{filter:drop-shadow(0 0 5px #ffb45c)}
+}
+</style>
+</head>
+<body>
+<div id="splashOverlay">
+  <img src="Splashscreen.png" alt="Splashscreen">
+</div>
+<h1>⚔ DB's Gothic-Schlossknacker 6.4.3 Final Premium ⚔</h1><div id='toast' style='display:none;position:sticky;top:10px;background:#2b2f35;border:1px solid #ffb45c;color:#ffb45c;padding:12px;border-radius:8px;margin-bottom:10px;z-index:999'></div>
+
+<div class="panel">
+Schieber: <select id="count"></select>
+<button onclick="build()">Neu</button>
+<button onclick="example()">📜 Beispiel laden</button>
+<button onclick="solve()">Schloss analysieren</button> <button onclick="saveLock()">💾 Speichern</button> <button onclick="loadLock()">📂 Laden</button> <button onclick="copySolution()">📋 Lösung kopieren</button>
+</div>
+
+<div class="panel"><h2>Startposition der Schlossstifte</h2><div id="positions"></div></div>
+
+<div class="panel">
+<h2>Einflussmatrix</h2>
+<table id="matrix" class="matrix"></table>
+<p>. = kein Einfluss | + = gleiche Richtung | - = entgegengesetzte Richtung</p>
+</div>
+
+
+
+<div class="panel">
+<button onclick="toggleSolution()">📜 Gesamtlösung anzeigen</button>
+<div id="solutionWrap" style="display:none;margin-top:10px">
+<div id="solution">-</div>
+</div>
+</div>
+
+<div class="panel">
+<div class="layout">
+<div>
+<h2>Aktueller Schritt</h2>
+<div id="step" style="font-size:32px;font-weight:900;text-align:center;color:#ffb45c;text-shadow:0 0 12px rgba(255,180,92,.8)">-</div>
+<div style="margin-top:10px" id="stepCounter">Schritt 0 von 0</div>
+<div style="margin-top:8px;background:#222;border:1px solid #555;height:18px;border-radius:4px;overflow:hidden">
+<div id="progressFill" style="height:100%;width:0%;background:linear-gradient(90deg,#b86618,#ffb45c);box-shadow:0 0 10px rgba(255,180,92,.7)"></div>
+</div>
+<div id="progressText" style="color:#ffb45c;margin-top:4px">0 %</div><br>
+<button onclick="prevStep()">← Zurück</button>
+<button onclick="nextStep()">Bestätigt →</button>
+</div>
+<div>
+<h2>Aktuelle Schlosslage</h2>
+<div id="live"></div>
+</div>
+</div>
+</div>
+
+
+<div class="panel">
+<h2>📚 Schlossbibliothek</h2>
+<button onclick="saveToLibrary()">💾 Aktuelles Schloss speichern</button>
+<div id="libraryList" style="margin-top:12px"></div>
+</div>
+
+<script>
+let steps=[],displayStates=[],idx=0,checkedStates=0; const MAX_STATES=500000;
+
+for(let i=1;i<=7;i++) count.add(new Option(i,i));
+count.value=4;
+
+function build(){
+ let n=+count.value;
+ let h='';
+ for(let i=1;i<=n;i++){
+  h+=`<div>S${i}: <span id=v${i}>4</span><div class="track" id=t${i}></div></div><br>`;
+ }
+ positions.innerHTML=h;
+ for(let i=1;i<=n;i++) drawPos(i,4);
+
+ let m='<tr><th></th>';
+ for(let c=1;c<=n;c++) m+=`<th>S${c}</th>`;
+ m+='</tr>';
+ for(let r=1;r<=n;r++){
+  m+=`<tr><th>S${r}</th>`;
+  for(let c=1;c<=n;c++){
+   m+=r===c?'<td class="lock">🔒</td>':'<td class="none mcell" data-s="0" onclick="cy(this)">.</td>';
+  }
+  m+='</tr>';
+ }
+ matrix.innerHTML=m;
+}
+
+function drawPos(s,p){
+ let h='';
+ for(let i=1;i<=7;i++) h+=`<div class="cell ${i===p?'active':''}" onclick="setPos(${s},${i})">${i}</div>`;
+ document.getElementById('t'+s).innerHTML=h;
+}
+function setPos(s,p){document.getElementById('v'+s).textContent=p;drawPos(s,p);}
+function cy(td){
+ let s=(+td.dataset.s+1)%3; td.dataset.s=s;
+ td.className=s===0?'none mcell':s===1?'plus mcell':'minus mcell';
+ td.textContent=s===0?'.':s===1?'+':'-';
+}
+
+function example(){
+ count.value=4; 
+function saveLock(){
+ const n=+count.value;
+ const positions=[];
+ for(let i=1;i<=n;i++) positions.push(+document.getElementById('v'+i).textContent);
+ const matrixData=[];
+ for(let r=1;r<=n;r++){
+   let row=[];
+   for(let c=1;c<=n;c++){
+      if(r===c){row.push('X');continue;}
+      row.push(matrix.rows[r].cells[c].dataset.s||'0');
+   }
+   matrixData.push(row);
+ }
+ localStorage.setItem('gothicLock62', JSON.stringify({n,positions,matrixData}));
+ showToast('💾 Schloss gespeichert.');
+}
+
+function loadLock(){
+ const raw=localStorage.getItem('gothicLock62');
+ if(!raw){showToast('⚠ Kein gespeichertes Schloss gefunden.');return;}
+ const data=JSON.parse(raw);
+ count.value=data.n;
+ build();
+ data.positions.forEach((v,i)=>{
+   document.getElementById('v'+(i+1)).textContent=v;
+   drawPos(i+1,v);
+ });
+ for(let r=1;r<=data.n;r++){
+   for(let c=1;c<=data.n;c++){
+     if(r===c) continue;
+     const val=data.matrixData[r-1][c-1];
+     const cell=matrix.rows[r].cells[c];
+     cell.dataset.s=val;
+     cell.className=val==='1'?'plus mcell':val==='2'?'minus mcell':'none mcell';
+     cell.textContent=val==='1'?'+':val==='2'?'-':'.';
+   }
+ }
+ showToast('📂 Schloss geladen.');
+}
+
+function copySolution(){
+ if(!steps.length){showToast('⚠ Keine Lösung vorhanden.');return;}
+ navigator.clipboard.writeText(steps.join(' | '));
+ showToast('📋 Lösung in Zwischenablage kopiert.');
+}
+
+build();
+ [6,6,3,5].forEach((v,i)=>{document.getElementById('v'+(i+1)).textContent=v;drawPos(i+1,v)});
+ let c=matrix.rows[1].cells[3]; c.dataset.s=2;c.className='minus mcell';c.textContent='-';
+}
+
+function getMap(n){
+ let map=Array.from({length:n},()=>[]);
+ for(let r=1;r<=n;r++)for(let c=1;c<=n;c++){
+   if(r===c)continue;
+   let cell=matrix.rows[r].cells[c],s=+cell.dataset.s;
+   if(s===1) map[r-1].push({dst:c-1,sign:1});
+   if(s===2) map[r-1].push({dst:c-1,sign:-1});
+ }
+ return map;
+}
+
+function solve(){
+ let n=+count.value;
+ let start=[]; for(let i=1;i<=n;i++) start.push(+document.getElementById('v'+i).textContent);
+ let goal=Array(n).fill(4), map=getMap(n);
+
+ checkedStates=0;
+let q=[start], vis=new Set([start.join(',')]), par=new Map();
+ while(q.length){
+   checkedStates++;
+   if(checkedStates % 1000===0){
+      status.innerHTML='🔍 Analysiere Schloss...<br>'+checkedStates.toLocaleString()+' Zustände geprüft';
+   }
+   if(checkedStates>=MAX_STATES){
+      status.innerHTML='⚠ Analyse abgebrochen<br><br>500.000 Zustände geprüft.<br><br>Das Schloss ist vermutlich nicht lösbar oder erzeugt einen zu großen Suchraum.';
+      return;
+   }
+   let st=q.shift(), key=st.join(',');
+   if(key===goal.join(',')){
+      let path=[],k=key;
+      while(par.has(k)){ let p=par.get(k); path.push(p.move); k=p.prev; }
+      path.reverse();
+
+      let comp=[],cur=null;
+      for(const mv of path){
+        let d=mv.d===1?'R':'L';
+        if(cur && cur.s===mv.s && cur.d===d) cur.c++;
+        else { if(cur) comp.push(cur); cur={s:mv.s,d:d,c:1}; }
+      }
+      if(cur) comp.push(cur);
+      steps=comp.map(x=>`S${x.s}=${x.c}x${x.d}`);
+
+      displayStates=[start.slice()];
+      let sim=start.slice();
+      for(const step of comp){
+        let m=step.c;
+        let slider=parseInt(step.s);
+        let dir=step.d==='R'?1:-1;
+        for(let i=0;i<m;i++){
+          sim[slider-1]+=dir;
+          for(const e of map[slider-1]) sim[e.dst]+=dir*e.sign;
+        }
+        displayStates.push(sim.slice());
+      }
+
+      idx=0;
+      showToast('✔ Lösung gefunden: '+steps.length+' Schritte');
+      render();
+      return;
+   }
+
+   for(let s=0;s<n;s++) for(let d of [-1,1]){
+      let nx=[...st];
+      nx[s]+=d;
+      let ok=nx[s]>=1&&nx[s]<=7;
+      if(ok){
+       for(const e of map[s]){
+        nx[e.dst]+=d*e.sign;
+        if(nx[e.dst]<1||nx[e.dst]>7){ok=false;break;}
+       }
+      }
+      if(!ok) continue;
+      let nk=nx.join(',');
+      if(!vis.has(nk)){
+       vis.add(nk);
+       par.set(nk,{prev:key,move:{s:s+1,d:d}});
+       q.push(nx);
+      }
+   }
+ }
+ showToast('⚠ Dieses Schloss ist nicht lösbar.');
+}
+
+function mirror(txt){
+ let m=txt.match(/^S(\d+)=(\d+)x([LR])$/);
+ if(!m)return '-';
+ return `Stift ${m[1]} = ${m[2]}x${m[3]=='L'?'R':'L'}`;
+}
+
+function render(){
+ solution.innerHTML=steps.map((s,i)=>i<idx?`<span class=done>✓ ${s}</span>`:i===idx?`<span class=current>► ${s}</span>`:s).join(' | ');
+ step.textContent=idx<steps.length?mirror(steps[idx]):'Schloss sollte nun geöffnet sein.';
+
+ let st=displayStates[Math.min(idx,displayStates.length-1)]||[];
+ let h='';
+ st.forEach((v,i)=>{
+   h+=`<div>S${i+1}<div class=track>`;
+   for(let p=1;p<=7;p++){
+     let cls='cell';
+     if(p===4) cls+=' goal';
+     if(p===v) cls+=' active';
+     h+=`<div class="${cls}">${p}</div>`;
+   }
+   h+='</div></div>';
+ });
+ live.innerHTML=h;
+ let total=Math.max(steps.length,1);
+ let current=Math.min(idx,steps.length);
+ let percent=Math.round((current/total)*100);
+ document.getElementById('stepCounter').textContent='Schritt '+current+' von '+steps.length;
+ document.getElementById('progressFill').style.width=percent+'%';
+ document.getElementById('progressText').textContent=percent+' %';
+}
+
+function nextStep(){ if(idx<steps.length) idx++; render(); }
+function prevStep(){ if(idx>0) idx--; render(); }
+
+
+function saveLock(){
+ const n=+count.value;
+ const positions=[];
+ for(let i=1;i<=n;i++) positions.push(+document.getElementById('v'+i).textContent);
+ const matrixData=[];
+ for(let r=1;r<=n;r++){
+   let row=[];
+   for(let c=1;c<=n;c++){
+      if(r===c){row.push('X');continue;}
+      row.push(matrix.rows[r].cells[c].dataset.s||'0');
+   }
+   matrixData.push(row);
+ }
+ localStorage.setItem('gothicLock62', JSON.stringify({n,positions,matrixData}));
+ showToast('💾 Schloss gespeichert.');
+}
+
+function loadLock(){
+ const raw=localStorage.getItem('gothicLock62');
+ if(!raw){showToast('⚠ Kein gespeichertes Schloss gefunden.');return;}
+ const data=JSON.parse(raw);
+ count.value=data.n;
+ build();
+ data.positions.forEach((v,i)=>{
+   document.getElementById('v'+(i+1)).textContent=v;
+   drawPos(i+1,v);
+ });
+ for(let r=1;r<=data.n;r++){
+   for(let c=1;c<=data.n;c++){
+     if(r===c) continue;
+     const val=data.matrixData[r-1][c-1];
+     const cell=matrix.rows[r].cells[c];
+     cell.dataset.s=val;
+     cell.className=val==='1'?'plus mcell':val==='2'?'minus mcell':'none mcell';
+     cell.textContent=val==='1'?'+':val==='2'?'-':'.';
+   }
+ }
+ showToast('📂 Schloss geladen.');
+}
+
+function copySolution(){
+ if(!steps.length){showToast('⚠ Keine Lösung vorhanden.');return;}
+ navigator.clipboard.writeText(steps.join(' | '));
+ showToast('📋 Lösung in Zwischenablage kopiert.');
+}
+
+build();
+
+function showToast(msg){
+ const t=document.getElementById('toast');
+ t.innerHTML=msg;
+ t.style.display='block';
+ clearTimeout(window.toastTimer);
+ window.toastTimer=setTimeout(()=>t.style.display='none',5000);
+}
+function toggleSolution(){
+ const w=document.getElementById('solutionWrap');
+ const b=event.target;
+ if(w.style.display==='none'){w.style.display='block'; b.textContent='📜 Gesamtlösung ausblenden';}
+ else {w.style.display='none'; b.textContent='📜 Gesamtlösung anzeigen';}
+}
+
+
+
+function getCurrentLockData(){
+ const n=+count.value,positions=[],matrixData=[];
+ for(let i=1;i<=n;i++) positions.push(+document.getElementById('v'+i).textContent);
+ for(let r=1;r<=n;r++){
+  let row=[];
+  for(let c=1;c<=n;c++){ if(r===c) row.push('X'); else row.push(matrix.rows[r].cells[c].dataset.s||'0'); }
+  matrixData.push(row);
+ }
+ return {n,positions,matrixData};
+}
+function saveToLibrary(){
+ const name=prompt('Name des Schlosses:');
+ if(!name)return;
+ let lib=JSON.parse(localStorage.getItem('gothicLibrary')||'[]');
+ lib.unshift({...getCurrentLockData(),name,created:new Date().toLocaleString('de-DE')});
+ localStorage.setItem('gothicLibrary',JSON.stringify(lib));
+ renderLibrary();
+}
+function loadLibraryItem(i){
+ let lib=JSON.parse(localStorage.getItem('gothicLibrary')||'[]'),d=lib[i]; if(!d)return;
+ count.value=d.n; build();
+ d.positions.forEach((v,x)=>{document.getElementById('v'+(x+1)).textContent=v;drawPos(x+1,v);});
+ for(let r=1;r<=d.n;r++)for(let c=1;c<=d.n;c++){ if(r===c)continue; let val=d.matrixData[r-1][c-1],cell=matrix.rows[r].cells[c]; cell.dataset.s=val; cell.className=val==='1'?'plus mcell':val==='2'?'minus mcell':'none mcell'; cell.textContent=val==='1'?'+':val==='2'?'-':'.';}
+ showToast('📂 Schloss geladen');
+}
+function deleteLibraryItem(i){
+ let lib=JSON.parse(localStorage.getItem('gothicLibrary')||'[]'); lib.splice(i,1);
+ localStorage.setItem('gothicLibrary',JSON.stringify(lib)); renderLibrary();
+}
+function renderLibrary(){
+ let box=document.getElementById('libraryList'); if(!box)return;
+ let lib=JSON.parse(localStorage.getItem('gothicLibrary')||'[]');
+ if(!lib.length){box.innerHTML='<i>Keine gespeicherten Schlösser vorhanden.</i>'; return;}
+ box.innerHTML=lib.map((e,i)=>'<div style="border:1px solid #444;padding:10px;margin:8px 0;border-radius:6px"><b>🗝 '+e.name+'</b><br>'+e.n+' Schieber<br>'+e.created+'<br><br><button onclick="loadLibraryItem('+i+')">📂 Laden</button> <button onclick="deleteLibraryItem('+i+')">🗑 Löschen</button></div>').join('');
+}
+
+window.addEventListener('load',()=>{renderLibrary();
+ const splash=document.getElementById('splashOverlay');
+ setTimeout(()=>{
+   splash.style.opacity='0';
+   setTimeout(()=>splash.remove(),800);
+ },1800);
+});
+
+if ('serviceWorker' in navigator) {
+ window.addEventListener('load', () => {
+   navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+ });
+}
+</script>
+</body>
+</html>
